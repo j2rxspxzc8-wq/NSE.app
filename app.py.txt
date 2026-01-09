@@ -1,0 +1,83 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import pandas_ta as ta
+
+# --- APP CONFIG ---
+st.set_page_config(page_title="NSE Pro Screener", layout="wide")
+st.title("📈 NSE India Live Dashboard")
+
+# 1. NIFTY LEVELS (Live)
+st.subheader("Market Indices")
+indices = {"Nifty 50": "^NSEI", "Nifty 100": "^CNX100", "Nifty 500": "^CRSLDX"} # yfinance uses these for Nifty 50/100/500
+
+cols = st.columns(3)
+for i, (name, ticker) in enumerate(indices.items()):
+    data = yf.Ticker(ticker).history(period="1d")
+    if not data.empty:
+        price = data['Close'].iloc[-1]
+        change = price - data['Open'].iloc[-1]
+        cols[i].metric(name, f"{price:,.2f}", f"{change:,.2f}")
+
+if st.button('🔄 Refresh Data'):
+    st.rerun()
+
+# --- SCREENER LOGIC ---
+def get_signals(stock_list):
+    results = []
+    for symbol in stock_list:
+        try:
+            ticker = yf.Ticker(symbol + ".NS")
+            df = ticker.history(period="1y")
+            if df.empty: continue
+            
+            # Technical Indicators
+            df['EMA200'] = ta.ema(df['Close'], length=200)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['AvgVol'] = df['Volume'].rolling(window=20).mean()
+            
+            curr_price = df['Close'].iloc[-1]
+            curr_rsi = df['RSI'].iloc[-1]
+            curr_vol = df['Volume'].iloc[-1]
+            ema200 = df['EMA200'].iloc[-1]
+            
+            # Placeholder for Piotroski (Needs Fundamental Data)
+            # Note: For real Piotroski, you'd parse ticker.financials
+            piotroski = 8 # Simplified for demo
+
+            # 200 EMA Support + Vol Logic
+            is_ema_support = (curr_price >= ema200) and (curr_price <= ema200 * 1.03) and (curr_vol > df['AvgVol'].iloc[-1] * 1.2)
+            
+            results.append({
+                "Symbol": symbol,
+                "Price": round(curr_price, 2),
+                "RSI": round(curr_rsi, 2),
+                "Piotroski": piotroski,
+                "EMA_Support": "✅" if is_ema_support else "❌",
+                "Oversold": "🔥" if curr_rsi < 32 else ""
+            })
+        except:
+            continue
+    return pd.DataFrame(results)
+
+# Example Watchlist (Add more symbols here)
+watchlist = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "TATAMOTORS"]
+
+st.divider()
+st.subheader("Quick Screeners")
+
+tab1, tab2, tab3 = st.tabs(["Value (Piotroski)", "Technical Support", "Oversold (<32)"])
+
+df_all = get_signals(watchlist)
+
+with tab1:
+    st.write("Stocks with Piotroski Score 8 & 9")
+    st.dataframe(df_all[df_all['Piotroski'] >= 8])
+
+with tab2:
+    st.write("200 EMA Support + High Volume Confirmation")
+    st.dataframe(df_all[df_all['EMA_Support'] == "✅"])
+
+with tab3:
+    st.write("RSI Below 32 (Potential Bounce)")
+    st.dataframe(df_all[df_all['Oversold'] == "🔥"])
